@@ -16,7 +16,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/dmgiulioromano/latex-docker-ubuntu:2025.1-small
+      image: ghcr.io/dmgiulioromano/latex-docker-ubuntu:2026.1-small
 
     steps:
       - name: Install pandoc
