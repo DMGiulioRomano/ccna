@@ -1,0 +1,193 @@
+name: Build Chapter PDFs
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'cap*/**'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/dmgiulioromano/latex-docker-ubuntu:2025.1-small
+
+    steps:
+      - name: Install pandoc
+        run: |
+          apt-get update -qq
+          apt-get install -y git wget
+          PANDOC_VERSION=3.8.2
+          wget -q https://github.com/jgm/pandoc/releases/download/${PANDOC_VERSION}/pandoc-${PANDOC_VERSION}-1-amd64.deb
+          apt-get install -y ./pandoc-${PANDOC_VERSION}-1-amd64.deb
+          rm pandoc-${PANDOC_VERSION}-1-amd64.deb
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Build changed PDFs
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          mkdir -p dist
+
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            BUILD_ALL=true
+          else
+            CHANGED=$(git diff --name-only HEAD~1 HEAD -- 'cap*/cap*.md' 2>/dev/null \
+              | cut -d'/' -f1 | sort -u | tr '\n' ' ')
+            echo "Changed chapters: ${CHANGED:-none}"
+          fi
+
+          for capdir in cap*/; do
+            cap="${capdir%/}"
+            md="${capdir}${cap}.md"
+            [ -f "$md" ] || continue
+            if [ "${BUILD_ALL:-false}" = "true" ] || echo " $CHANGED " | grep -q " $cap "; then
+              echo "==> Building ${cap}.pdf"
+              pandoc "$md" \
+                --pdf-engine=xelatex \
+                -V geometry:margin=2.5cm \
+                -V lang=it \
+                -o "dist/${cap}.pdf"
+            else
+              echo "--- Skipping $cap (unchanged)"
+            fi
+          done
+          ls -lh dist/ 2>/dev/null || echo "No PDFs built this run"
+
+      - name: Upload PDFs artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: chapter-pdfs
+          path: dist/
+          if-no-files-found: ignore
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download PDFs
+        uses: actions/download-artifact@v4
+        with:
+          name: chapter-pdfs
+          path: dist/
+
+      - name: Upload to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view latest --repo ${{ github.repository }} 2>/dev/null || \
+            gh release create latest \
+              --repo ${{ github.repository }} \
+              --title "Chapter PDFs (latest)" \
+              --notes "PDF generati automaticamente dal sorgente markdown." \
+              --latest=false
+          if ls dist/*.pdf 1>/dev/null 2>&1; then
+            gh release upload latest dist/*.pdf \
+              --repo ${{ github.repository }} \
+              --clobber
+          fi
+
+      - name: Generate index.html
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          mkdir -p pages_artifact
+          python3 << 'PYEOF'
+          import json, os, urllib.request, datetime
+
+          repo = os.environ['REPO']
+          token = os.environ['GH_TOKEN']
+
+          req = urllib.request.Request(
+              f'https://api.github.com/repos/{repo}/releases/tags/latest',
+              headers={'Authorization': f'token {token}', 'Accept': 'application/vnd.github+json'}
+          )
+          try:
+              with urllib.request.urlopen(req) as r:
+                  data = json.loads(r.read())
+          except Exception:
+              data = {'assets': []}
+
+          assets = sorted(
+              [a for a in data.get('assets', []) if a['name'].endswith('.pdf')],
+              key=lambda a: a['name']
+          )
+          timestamp = datetime.datetime.utcnow().strftime('%d/%m/%Y %H:%M UTC')
+
+          def label(name):
+              n = name.replace('.pdf', '').replace('cap', '')
+              try:
+                  return f'Capitolo {int(n)}'
+              except ValueError:
+                  return name.replace('.pdf', '')
+
+          items = '\n      '.join(
+              f'<li><a href="{a["browser_download_url"]}">'
+              f'<span>{label(a["name"])}</span>'
+              f'<span class="size">{a["size"] // 1024} KB &#x2193;</span>'
+              f'</a></li>'
+              for a in assets
+          ) or '<li style="color:#8b949e">Nessun capitolo disponibile.</li>'
+
+          html = f"""<!DOCTYPE html>
+          <html lang="it">
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>CCNA Study Notes</title>
+            <style>
+              *{{box-sizing:border-box;margin:0;padding:0}}
+              body{{font-family:system-ui,-apple-system,sans-serif;background:#0d1117;color:#c9d1d9;min-height:100vh;padding:2rem}}
+              h1{{color:#f0f6fc;margin-bottom:.25rem;font-size:1.8rem}}
+              .sub{{color:#8b949e;margin-bottom:2rem;font-size:.9rem}}
+              ul{{list-style:none;max-width:560px}}
+              li{{margin-bottom:.6rem}}
+              a{{display:flex;justify-content:space-between;align-items:center;padding:.75rem 1rem;background:#161b22;border:1px solid #30363d;border-radius:8px;color:#58a6ff;text-decoration:none;font-weight:500;transition:border-color .15s,background .15s}}
+              a:hover{{background:#1c2128;border-color:#58a6ff}}
+              .size{{font-size:.8rem;color:#8b949e;font-weight:400}}
+              footer{{margin-top:2.5rem;color:#484f58;font-size:.8rem}}
+            </style>
+          </head>
+          <body>
+            <h1>CCNA Study Notes</h1>
+            <p class="sub">PDF generati automaticamente dal sorgente markdown.</p>
+            <ul>
+              {items}
+            </ul>
+            <footer>Aggiornato: {timestamp}</footer>
+          </body>
+          </html>"""
+
+          with open('pages_artifact/index.html', 'w') as f:
+              f.write(html)
+          print(f"Generated index with {len(assets)} chapter(s)")
+          PYEOF
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: pages_artifact
+
+  deploy:
+    needs: publish
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
