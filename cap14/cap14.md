@@ -632,3 +632,124 @@ TCP    0.0.0.0:80                0.0.0.0:*                 LISTENING
 
 Il socket è il "gancio" che permette a un'applicazione di utilizzare i servizi del Transport Layer senza conoscere i dettagli della rete sottostante. È l'astrazione che rende possibile la programmazione di rete moderna.
 
+
+#  Teoria — Livello di Trasporto
+
+Ottima scelta! Studiamo insieme i **Topic 3 e 4**:
+- **UDP Overview** – Caratteristiche di UDP
+- **Port Numbers** – Come TCP e UDP usano i numeri di porta
+
+---
+
+## Topic 3 — UDP (User Datagram Protocol)
+
+### Cos'è UDP?
+
+UDP è un protocollo di trasporto **connectionless** (senza connessione): invia dati senza prima stabilire una sessione con il destinatario. È come imbucare una lettera — la spedisci e non sai se arriva.
+
+### Caratteristiche principali
+
+| Caratteristica | UDP |
+|---|---|
+| Connessione | x Connectionless |
+| Affidabilità | x Best-effort (nessuna garanzia) |
+| Ordinamento dei segmenti | x Non garantito |
+| Controllo di flusso | v Assente |
+| Velocità | v Alta (overhead minimo) |
+| Intestazione (header) | v Leggera — solo **8 byte** |
+
+### Header UDP — struttura
+
+```
+ 0          15 16         31
+ ┌─────────────┬─────────────┐
+ │  Porta Src  │  Porta Dst  │  ← 4 byte
+ ├─────────────┼─────────────┤
+ │   Lunghezza │   Checksum  │  ← 4 byte
+ └─────────────┴─────────────┘
+          Totale: 8 byte
+```
+
+Solo 4 campi, nessun numero di sequenza, nessun ACK.
+
+### Quando si usa UDP?
+
+UDP è preferito quando la **velocità conta più della precisione**:
+
+| Protocollo | Porta | Motivo |
+|---|---|---|
+| DNS | 53 | Query rapide |
+| DHCP | 67/68 | Broadcast, no connessione |
+| TFTP | 69 | Trasferimento file semplice |
+| SNMP | 161 | Polling di rete |
+| RIP | 520 | Routing updates |
+| Streaming video/VoIP | vari | Latenza critica |
+
+>  **Analogia:** UDP è come urlare un'informazione in una stanza — veloce, ma non sai se tutti hanno sentito.
+
+---
+
+## Topic 4 — Numeri di Porta (Port Numbers)
+
+### A cosa servono le porte?
+
+L'indirizzo IP identifica **il dispositivo**, la porta identifica **l'applicazione** su quel dispositivo. Questo meccanismo si chiama **multiplexing**.
+
+```
+  Client                          Server
+  ┌──────────────┐                ┌──────────────┐
+  │ Browser  :1050│ ─────────────▶│ Web    :80   │
+  │ Email    :1051│ ─────────────▶│ Email  :25   │
+  │ DNS req  :1052│ ─────────────▶│ DNS    :53   │
+  └──────────────┘                └──────────────┘
+     Porte dinamiche                 Porte note
+```
+
+### Le 3 categorie di porte
+
+| Categoria | Range | Descrizione |
+|---|---|---|
+| **Well-Known** (note) | 0 – 1023 | Assegnate a servizi standard (HTTP, FTP…) |
+| **Registered** (registrate) | 1024 – 49151 | Usate da applicazioni specifiche |
+| **Dynamic/Private** (dinamiche) | 49152 – 65535 | Assegnate temporaneamente dai client |
+
+### Porte fondamentali da memorizzare per il CCNA
+
+| Porta | Protocollo | TCP/UDP |
+|---|---|---|
+| 20/21 | FTP (dati/controllo) | TCP |
+| 22 | SSH | TCP |
+| 23 | Telnet | TCP |
+| 25 | SMTP | TCP |
+| 53 | DNS | **TCP + UDP** |
+| 67/68 | DHCP | UDP |
+| 69 | TFTP | UDP |
+| 80 | HTTP | TCP |
+| 110 | POP3 | TCP |
+| 161/162 | SNMP | UDP |
+| 443 | HTTPS | TCP |
+| 514 | Syslog | UDP |
+
+>  **Nota importante:** DNS usa **entrambi** — UDP per le query normali (≤512 byte), TCP per trasferimenti di zona o risposte grandi.
+
+### Come funziona una comunicazione completa
+
+```
+Client (IP: 10.0.0.1)         Server (IP: 10.0.0.10)
+porta src: 50234    ──────▶   porta dst: 80 (HTTP)
+porta dst: 80       ◀──────   porta src: 80
+                              porta dst: 50234
+```
+
+La combinazione **IP sorgente + porta sorgente + IP destinazione + porta destinazione** forma un **socket** univoco che identifica ogni conversazione.
+
+---
+
+##  Riepilogo punti chiave
+
+- **UDP** = veloce, leggero, connectionless, nessuna garanzia di consegna — ideale per DNS, DHCP, VoIP
+- **Header UDP** = solo 8 byte (vs 20 byte di TCP)
+- **Le porte** permettono a più applicazioni di comunicare contemporaneamente sullo stesso dispositivo
+- **Well-known ports** (0-1023) → servizi standard | **Dynamic ports** (49152-65535) → client
+
+---
